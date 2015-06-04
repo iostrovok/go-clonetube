@@ -14,50 +14,64 @@ type isStop struct {
 
 type Main struct {
 	sync.RWMutex
-	CurrentID int64
-	Len       int
-	Func      CloneFn
-	ChOut     chan Item
-	ChIn      chan interface{}
-	Body      interface{}
+	currentID  int64
+	threads    []chan *item
+	lenChannel int
+	numThreads int
+	cFunc      CloneFn
+	chOut      chan *item
+	chIn       chan interface{}
+	tCh        *threadsChannels
+	wg         *sync.WaitGroup
+	body       interface{}
 }
 
-type Item struct {
-	ID   int64
-	Body interface{}
+type item struct {
+	i    int
+	id   int64
+	body interface{}
 }
 
-func New(l int, f CloneFn) *Main {
+func New(l int, f CloneFn, threadNumber ...int) *Main {
 
 	chIn := make(chan interface{}, 10)
-	chOut := make(chan Item, l)
+	chOut := make(chan *item, l)
 
 	cloneTube := &Main{
-		CurrentID: 0,
-		Len:       l,
-		Func:      f,
-		ChOut:     chOut,
-		ChIn:      chIn,
-		Body:      nil,
+		currentID:  0,
+		lenChannel: l,
+		numThreads: 1,
+		cFunc:      f,
+		chOut:      chOut,
+		chIn:       chIn,
+		body:       nil,
+		wg:         &sync.WaitGroup{},
 	}
+
+	if len(threadNumber) > 0 && threadNumber[0] > 0 {
+		cloneTube.numThreads = threadNumber[0]
+	}
+
+	cloneTube.tCh = newThreadsChannels(cloneTube.numThreads, cloneTube.lenChannel)
+	cloneTube.threads = make([]chan *item, 0)
+
+	go cloneTube._start()
 
 	return cloneTube
 }
 
-func (cloneTube *Main) Start() *Main {
-
-	// Ready for work
-	go cloneTube._start()
-	return cloneTube
+func (cloneTube *Main) _start() {
+	for {
+		select {
+		case in, ok := <-cloneTube.chIn:
+			if !cloneTube._readIn(in, ok) {
+				return
+			}
+		}
+	}
 }
 
 func (cloneTube *Main) _readIn(in interface{}, ok bool) bool {
-
-	// Clean old data
-	go cloneTube.clean(cloneTube.CurrentID)
-
-	cloneTube.Body = in
-	cloneTube.CurrentID++
 
 	if !ok {
 		cloneTube.closeChanals()
@@ -69,62 +83,48 @@ func (cloneTube *Main) _readIn(in interface{}, ok bool) bool {
 		return false
 	}
 
+	// Clean old data
+	for _, ch := range cloneTube.threads {
+		ch <- &item{}
+	}
+
+	go cloneTube.clean(cloneTube.currentID)
+
+	cloneTube.body = in
+	cloneTube.currentID++
+	threads := cloneTube.tCh.nextSet()
+	cloneTube.wg.Add(cloneTube.numThreads)
+	for i := 0; i < cloneTube.numThreads; i++ {
+		go func(id int64, body interface{}, f CloneFn, ChIn, ChOut chan *item) {
+			newThread(id, body, f, ChIn, ChOut)
+			cloneTube.wg.Done()
+		}(cloneTube.currentID, cloneTube.body, cloneTube.cFunc, threads[i], cloneTube.chOut)
+	}
+
+	cloneTube.threads = threads
+
 	return true
 }
 
-func (cloneTube *Main) _start() {
-	//
-	for {
-
-		b, err := cloneTube.Func(cloneTube.Body)
-		if err != nil {
-			select {
-			case in, ok := <-cloneTube.ChIn:
-				if !cloneTube._readIn(in, ok) {
-					return
-				}
-			}
-			continue
-		}
-
-		// If we have good clone copy
-		it := Item{
-			ID:   cloneTube.CurrentID,
-			Body: b,
-		}
-
-		select {
-		case in, ok := <-cloneTube.ChIn:
-			if !cloneTube._readIn(in, ok) {
-				return
-			}
-		case cloneTube.ChOut <- it:
-			// Nothiing
-		}
-	}
-}
-
 func (cloneTube *Main) Get(timeOutMicrosecond int) (interface{}, error) {
-	//
 	out, err := cloneTube._get(timeOutMicrosecond)
 	if err != nil {
 		return nil, err
 	}
-	return out.Body, nil
+	return out.body, nil
 }
 
-func (cloneTube *Main) _get(timeOutMicrosecond int) (Item, error) {
-
+func (cloneTube *Main) _get(timeOutMicrosecond int) (*item, error) {
 	var (
 		err error
-		out Item
+		out *item
 		ok  bool
 	)
 
 	select {
-	case out, ok = <-cloneTube.ChOut:
+	case out, ok = <-cloneTube.chOut:
 		if !ok {
-			err = errors.New("cloneTube.ChOut is closed. You have to run cloneTube.New(....)")
+			err = errors.New("cloneTube.chOut is closed. You have to run cloneTube.New(....)")
 		}
 	case <-time.After(time.Microsecond * time.Duration(timeOutMicrosecond)):
 		err = errors.New("timeout cloneTube.Get")
@@ -135,25 +135,28 @@ func (cloneTube *Main) _get(timeOutMicrosecond int) (Item, error) {
 
 func (cloneTube *Main) Put(in interface{}) error {
 
-	if _, err := cloneTube.Func(in); err != nil {
+	if _, err := cloneTube.cFunc(in); err != nil {
 		return err
 	}
 
-	cloneTube.ChIn <- in
+	cloneTube.chIn <- in
 
 	return nil
 }
 
+/*
+	Skip old values from output channel
+*/
 func (cloneTube *Main) clean(id int64) {
 
 	var lastID int64 = 0
-	for lastID <= id {
+	for lastID < id {
 		select {
-		case it, ok := <-cloneTube.ChOut:
+		case it, ok := <-cloneTube.chOut:
 			if !ok {
 				return
 			}
-			lastID = it.ID
+			lastID = it.id
 		}
 	}
 }
@@ -165,18 +168,24 @@ func (cloneTube *Main) closeChanals() {
 	cloneTube.Lock()
 	defer cloneTube.Unlock()
 
-	if cloneTube.ChOut != nil {
-		close(cloneTube.ChOut)
+	for _, ch := range cloneTube.threads {
+		ch <- &item{}
 	}
 
-	if cloneTube.ChIn != nil {
-		close(cloneTube.ChIn)
+	cloneTube.wg.Wait()
+
+	if cloneTube.chIn != nil {
+		close(cloneTube.chIn)
+	}
+
+	if cloneTube.chOut != nil {
+		close(cloneTube.chOut)
 	}
 }
 
 /*
-	Close chanel when stop work
+	Stop our gorroutens*
 */
 func (cloneTube *Main) Stop() {
-	cloneTube.ChIn <- isStop{}
+	cloneTube.chIn <- isStop{}
 }
