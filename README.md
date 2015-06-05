@@ -117,22 +117,22 @@ if err := cloneTube.Put(s); err != nil {
 
 ```
 
-#### func (cloneTube *Main) Get(timeOutMicrosecond int) (interface{}, error) ####
+#### func (cloneTube *Main) Get(timeOutMicrosecond ...int) (interface{}, error) ####
 ##### Params #####
-- timeout in microseconds
+- timeout in microseconds / optional
 
 ##### Returning #####
 - interface{} -  clone of object
 - error
 
 ##### Action #####
-Set or replace object which is cloning
+Retruns a clone object.
 
-Notece!
-We have short time term between "Put(new_object)" and "Get() as new_object":
-some of first requests of Get() can return old object.
-
-It depends on clone function speed and number of cached params in the storage.
+If program often uses the Get(...) method and there are no prepared clones:
+if  timeout doesn't set:
+	we are waiting while clone function makes objects.
+else:
+	we get a clone or "timeout" error.
 
 ```go
 /*
