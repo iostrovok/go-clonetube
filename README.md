@@ -129,9 +129,13 @@ if err := cloneTube.Put(s); err != nil {
 Retruns a clone object.
 
 If program often uses the Get(...) method and there are no prepared clones:
+
 if  timeout doesn't set:
+
 	we are waiting while clone function makes objects.
+	
 else:
+
 	we get a clone or "timeout" error.
 
 ```go
