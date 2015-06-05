@@ -106,31 +106,45 @@ func (cloneTube *Main) _readIn(in interface{}, ok bool) bool {
 	return true
 }
 
-func (cloneTube *Main) Get(timeOutMicrosecond int) (interface{}, error) {
-	out, err := cloneTube._get(timeOutMicrosecond)
+func (cloneTube *Main) Get(timeOutMicrosecond ...int) (interface{}, error) {
+	out, err := cloneTube._get(timeOutMicrosecond...)
 	if err != nil {
 		return nil, err
 	}
 	return out.body, nil
 }
 
-func (cloneTube *Main) _get(timeOutMicrosecond int) (*item, error) {
+func (cloneTube *Main) _get(timeOutMicrosecond ...int) (*item, error) {
 	var (
-		err error
-		out *item
-		ok  bool
+		err          error
+		out          *item
+		ok           bool
+		microseconds int
 	)
 
-	select {
-	case out, ok = <-cloneTube.chOut:
-		if !ok {
-			err = errors.New("cloneTube.chOut is closed. You have to run cloneTube.New(....)")
-		}
-	case <-time.After(time.Microsecond * time.Duration(timeOutMicrosecond)):
-		err = errors.New("timeout cloneTube.Get")
+	if len(timeOutMicrosecond) > 0 {
+		microseconds = timeOutMicrosecond[0]
 	}
 
+	if microseconds > 0 {
+		select {
+		case out, ok = <-cloneTube.chOut:
+			if !ok {
+				err = errors.New("cloneTube.chOut is closed. You have to run cloneTube.New(....)")
+			}
+		case <-time.After(time.Microsecond * time.Duration(microseconds)):
+			err = errors.New("timeout cloneTube.Get")
+		}
+	} else {
+		select {
+		case out, ok = <-cloneTube.chOut:
+			if !ok {
+				err = errors.New("cloneTube.chOut is closed. You have to run cloneTube.New(....)")
+			}
+		}
+	}
 	return out, err
+
 }
 
 func (cloneTube *Main) Put(in interface{}) error {

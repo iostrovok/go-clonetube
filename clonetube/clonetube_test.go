@@ -83,6 +83,27 @@ func (s *CloneTubeTestsSuite) TestCloneTubePutThread(c *C) {
 	ct.Stop()
 }
 
+func (s *CloneTubeTestsSuite) TestCloneTubeGetWithTimeOutLargeObject(c *C) {
+
+	//c.Skip("Not now")
+	ct := New(ChLen, MyTestFuncClone, 1)
+	c.Assert(ct, NotNil)
+
+	cl := genTestTree(8, 9)
+	ct.Put(cl)
+
+	w, err := ct.Get()
+	c.Assert(err, IsNil)
+	c.Assert(w, NotNil)
+
+	inter, ok := w.(CloneTestStruture)
+
+	c.Assert(ok, Equals, true)
+	c.Assert(inter.ID, Equals, 1)
+
+	ct.Stop()
+}
+
 func (s *CloneTubeTestsSuite) TestCloneTubeGet_100(c *C) {
 
 	//c.Skip("Not now")
