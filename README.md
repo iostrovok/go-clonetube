@@ -1,4 +1,4 @@
-## Simple module which prepares clones in background and returns by demand ##
+## Simple module which prepares clone objects in background and returns by demand ##
 
 ### Installing ###
 ```bash
